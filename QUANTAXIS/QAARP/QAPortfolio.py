@@ -29,11 +29,11 @@ import pandas as pd
 from QUANTAXIS.QAARP.QAAccount import QA_Account
 from QUANTAXIS.QAUtil import (DATABASE, QA_util_log_info,
                               QA_util_random_with_topic)
-
+from QUANTAXIS.QAUtil import MARKET_TYPE, RUNNING_ENVIRONMENT
 # pylint: disable=old-style-class, too-few-public-methods
 
 
-class QA_Portfolio():
+class QA_Portfolio(QA_Account):
     """QA_Portfolio
     User-->Portfolio-->Account/Strategy
 
@@ -76,9 +76,13 @@ class QA_Portfolio():
 
     @yutiansut
     修改init_assets ==> init_cash ,删除cash,history在初始的输入
+
+    @2018/11/02
+
     """
 
-    def __init__(self, user_cookie=None, portfolio_cookie=None, strategy_name=None, init_cash=1000000, sell_available=None):
+    def __init__(self, user_cookie=None, portfolio_cookie=None, strategy_name=None, init_cash=100000000, sell_available=None, market_type=MARKET_TYPE.STOCK_CN,
+                        running_environment=RUNNING_ENVIRONMENT.BACKETEST):
         self.user_cookie = user_cookie
         # self.portfolio_cookie = QA_util_random_with_topic('Portfolio')
         self.portfolio_cookie = QA_util_random_with_topic(
@@ -88,10 +92,13 @@ class QA_Portfolio():
         # 和account一样的资产类
         self.init_cash = init_cash
         self.cash = [self.init_cash]
-        self.cash_available = self.cash[-1]  # 可用资金
+        # 可用资金
         self.sell_available = sell_available
         #self.history = []
         self.time_index = []
+        self.commission_coeff = 0.005
+        self.market_type = market_type
+        self.running_environment = running_environment
 
         for cookie in self.accounts.keys():
             self.accounts[cookie] = QA_Account(account_cookie=cookie)
@@ -107,6 +114,10 @@ class QA_Portfolio():
     def init_hold(self):
         return self.init_hold_table.groupby('code').sum()
 
+    @property
+    def cash_available(self):
+        return self.cash[-1]
+
     def get_portfolio(self):
         'return the accounts dict'
         return self.accounts
@@ -114,30 +125,45 @@ class QA_Portfolio():
     def add_account(self, account):
         'portfolio add a account/stratetgy'
         if account.account_cookie not in self.accounts.keys():
-            account.portfolio_cookie = self.portfolio_cookie
-            account.user_cookie = self.user_cookie
-            self.accounts[account.account_cookie] = account
+            if self.cash_available > account.init_cash:
+                account.portfolio_cookie = self.portfolio_cookie
+                account.user_cookie = self.user_cookie
+                self.cash.append(self.cash_available-account.init_cash)
+                self.accounts[account.account_cookie] = account
         else:
             pass
 
-    def new_account(self, account_cookie=None):
-        'portfolio create a account/strategy'
-        if account_cookie is None:
-            temp = QA_Account(portfolio_cookie=self.portfolio_cookie,
-                              user_cookie=self.user_cookie)
-            if temp.account_cookie not in self.accounts.keys():
-                self.accounts[temp.account_cookie] = temp
-                return temp
+    def new_account(self, account_cookie=None, init_cash=1000000, *args, **kwargs):
+        """创建一个新的Account
 
-            else:
-                return self.new_account()
+        Keyword Arguments:
+            account_cookie {[type]} -- [description] (default: {None})
+
+        Returns:
+            [type] -- [description]
+        """
+
+        if account_cookie is None:
+            if self.cash_available > init_cash:
+
+                temp = QA_Account(portfolio_cookie=self.portfolio_cookie, init_cash=init_cash,
+                                  user_cookie=self.user_cookie, *args, **kwargs)
+                if temp.account_cookie not in self.accounts.keys():
+                    self.accounts[temp.account_cookie] = temp
+                    self.cash.append(self.cash_available-init_cash)
+                    return temp
+
+                else:
+                    return self.new_account()
         else:
-            if account_cookie not in self.accounts.keys():
-                self.accounts[account_cookie] = QA_Account(portfolio_cookie=self.portfolio_cookie,
-                                                           user_cookie=self.user_cookie, account_cookie=account_cookie)
-                return self.accounts[account_cookie]
-            else:
-                return self.new_account(account_cookie)
+            if self.cash_available > init_cash:
+                if account_cookie not in self.accounts.keys():
+                    self.accounts[account_cookie] = QA_Account(portfolio_cookie=self.portfolio_cookie, init_cash=init_cash,
+                                                               user_cookie=self.user_cookie, account_cookie=account_cookie, *args, **kwargs)
+                    self.cash.append(self.cash_available-init_cash)
+                    return self.accounts[account_cookie]
+                else:
+                    return self.accounts[account_cookie]
 
     def get_account_by_cookie(self, cookie):
         '''
@@ -239,18 +265,6 @@ class QA_Portfolio():
     @property
     def history_table(self):
         return pd.concat([account.history_table for account in list(self.accounts.values())])
-
-
-class QA_TEST_MAKEPortfolio():
-
-    def __init__(self):
-        """
-        this is a dict for account_cookie----account instance
-        """
-        self.account_list = dict()
-
-    def make_portfolio(self, account_list):
-        pass
 
 
 class QA_PortfolioView():
